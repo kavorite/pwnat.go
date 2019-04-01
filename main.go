@@ -55,11 +55,16 @@ func main() {
 	// TTL.
 	if svAddr == "" {
 		picket.Listen(nil, onPeerDiscovered)
-	} else if listenerPort != 0 {
-		sv := Server{PSK: *psk}
+		fmt.Fprintln(os.Stderr, "listening on all interfaces")
 	} else {
-		prog := os.Args[0]
-		fmt.Fprintf(os.Stderr, "Usage: %s [-c addr] [-psk <pass>]", prog)
-		os.Exit(1)
+		remote := net.ParseIP(svAddr)
+		if remote == nil {
+			ips, err := net.LookupIP(svAddr)
+			if err != nil {
+				panic(fmt.Errorf("resolve hostname: %s", err))
+			}
+			remote = ips[0]
+		}
+		picket.Telegraph(&IPAddr{remote,""})
 	}
 }
