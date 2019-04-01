@@ -3,7 +3,6 @@ package main
 import (
 	"flag"
 	"fmt"
-	"github.com/beevik/ntp"
 	"io"
 	"os"
 	"strings"
@@ -26,15 +25,6 @@ func main() {
 			" Don't make this anything sensitive, as it won't be encrypted"+
 			" or obfuscated in any way.")
 	flag.Parse()
-	rsp, _ := ntp.Query(ntpHost)
-	t := rsp.Time.Add(rsp.RTT)
-	ticker := make(chan time.Time)
-	go func() {
-		time.Sleep(t.Sub(t.Round(time.Second)))
-		for t := range time.NewTicker(time.Second) {
-			ticker <- t
-		}
-	}()
 	picket := Picket{PSK: psk, NTP: ntpHost}
 	// if we're serving, wait for clients to connect, telegraph them, then
 	// attempt simultaneous open() on the synchro ticker for some predetermined
