@@ -17,6 +17,30 @@ var (
 	accepting    sync.Map
 )
 
+func onPeerDiscovered(peer net.IPAddr) {
+	if _, ok := accepting.Load(peer); ok {
+		return
+	}
+	accepting.Store(peer, struct{}{})
+	deadline := time.Now().Add(time.Minute)
+	go func() {
+		for time.Now().Before(deadline) {
+			picket.Telegraph(&peer)
+		}
+	}()
+	go func() {
+		time.Sleep(time.Minute)
+		accepting.Delete(peer)
+	}()
+	conn, err := picket.SyncOpen(peer, 50*time.Millisecond, &deadline)
+	if err != nil {
+		panic(err)
+	}
+	fmt.Fprintf(os.Stderr, "%s\n", peer)
+	go io.Copy(os.Stdout, conn)
+	io.Copy(conn, os.Stdin)
+}
+
 func main() {
 	flag.StringVar(&svAddr, "c", "Server address to petition as a client.")
 	flag.StringVar(&ntpHost, "ntp", "NTP server", "NTP host to query.")
@@ -30,29 +54,7 @@ func main() {
 	// attempt simultaneous open() on the synchro ticker for some predetermined
 	// TTL.
 	if svAddr == "" {
-		picket.Listen(nil, func(peer) {
-			if _, ok := accepting.Load(peer); ok {
-				return
-			}
-			accepting.Store(peer, struct{}{})
-			deadline := time.Now().Add(time.Minute)
-			go func() {
-				for time.Now().Before(deadline) {
-					picket.Telegraph(&peer)
-				}
-			}()
-			go func() {
-				time.Sleep(time.Minute)
-				accepting.Delete(peer)
-			}()
-			conn, err := picket.SyncOpen(peer, 50*time.Millisecond, &deadline)
-			if err != nil {
-				panic(err)
-			}
-			fmt.Fprintf(os.Stderr, "%s\n", peer)
-			go io.Copy(conn, os.Stdin)
-			go io.Copy(os.Stdout, conn)
-		})
+		picket.Listen(nil, onPeerDiscovered)
 	} else if listenerPort != 0 {
 		sv := Server{PSK: *psk}
 	} else {
