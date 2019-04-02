@@ -1,19 +1,20 @@
-package main
+package pwnat
 
 import (
+	"net"
 	"flag"
 	"fmt"
 	"io"
 	"os"
-	"strings"
 	"sync"
 	"time"
 )
 
 var (
-	listenerPort uint
+	svAddr string
 	psk          string
 	ntpHost      = "time.google.com"
+	picket 		 Picket
 	accepting    sync.Map
 )
 
@@ -42,14 +43,14 @@ func onPeerDiscovered(peer net.IPAddr) {
 }
 
 func main() {
-	flag.StringVar(&svAddr, "c", "Server address to petition as a client.")
+	flag.StringVar(&svAddr, "c", "", "Server address to petition as a client.")
 	flag.StringVar(&ntpHost, "ntp", "NTP server", "NTP host to query.")
-	flag.StringVar(&psk, "psk", "Pre-shared key", "pwnat.go",
+	flag.StringVar(&psk, "psk", "go",
 		"Pre-shared key used to identify valid clients."+
 			" Don't make this anything sensitive, as it won't be encrypted"+
 			" or obfuscated in any way.")
 	flag.Parse()
-	picket := Picket{PSK: psk, NTP: ntpHost}
+	picket = Picket{PSK: psk, NTP: ntpHost}
 	// if we're serving, wait for clients to connect, telegraph them, then
 	// attempt simultaneous open() on the synchro ticker for some predetermined
 	// TTL.
@@ -65,6 +66,6 @@ func main() {
 			}
 			remote = ips[0]
 		}
-		picket.Telegraph(&IPAddr{remote,""})
+		picket.Telegraph(&net.IPAddr{IP: remote, Zone: ""})
 	}
 }
