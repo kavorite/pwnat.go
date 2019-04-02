@@ -113,7 +113,7 @@ func (sv Picket) Echo (fakeHost *net.IPAddr, onDiscovered func(net.IPAddr)) (err
 		echo := read.Body.(*icmp.Echo)
 		hasher.Write([]byte(sv.PSK))
 		if echo.ID == int(hasher.Sum32()) {
-			onDiscovered(*peer.(*net.IPAddr))
+			go onDiscovered(*peer.(*net.IPAddr))
 		}
 	}
 	return
