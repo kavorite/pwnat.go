@@ -1,4 +1,4 @@
-package pwnat
+package main
 
 import (
 	"net"
@@ -8,13 +8,14 @@ import (
 	"os"
 	"sync"
 	"time"
+	"../.."
 )
 
 var (
 	svAddr string
 	psk          string
 	ntpHost      = "time.google.com"
-	picket 		 Picket
+	picket 		 pwnat.Picket
 	accepting    sync.Map
 )
 
@@ -44,19 +45,25 @@ func onPeerDiscovered(peer net.IPAddr) {
 
 func main() {
 	flag.StringVar(&svAddr, "c", "", "Server address to petition as a client.")
-	flag.StringVar(&ntpHost, "ntp", "NTP server", "NTP host to query.")
+	flag.StringVar(&ntpHost, "ntp", "time.google.com", "NTP host to query.")
 	flag.StringVar(&psk, "psk", "go",
 		"Pre-shared key used to identify valid clients."+
 			" Don't make this anything sensitive, as it won't be encrypted"+
 			" or obfuscated in any way.")
 	flag.Parse()
-	picket = Picket{PSK: psk, NTP: ntpHost}
+	picket = pwnat.Picket{PSK: psk, NTP: ntpHost}
 	// if we're serving, wait for clients to connect, telegraph them, then
 	// attempt simultaneous open() on the synchro ticker for some predetermined
 	// TTL.
 	if svAddr == "" {
-		picket.Listen(nil, onPeerDiscovered)
 		fmt.Fprintln(os.Stderr, "listening on all interfaces")
+		ticker := time.NewTicker(500 * time.Millisecond)
+		for range ticker.C {
+			err := picket.Echo(nil, onPeerDiscovered)
+			if err != nil {
+				panic(fmt.Errorf("echo loop: %s", err))
+			}
+		}
 	} else {
 		remote := net.ParseIP(svAddr)
 		if remote == nil {

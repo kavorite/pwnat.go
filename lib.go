@@ -76,11 +76,12 @@ func (sv Picket) SyncOpen(remote net.IPAddr, interval time.Duration, deadline *t
 	return
 }
 
-// Listen begins attempting to connect to pwnat clients on a given IP address,
-// with a given fake host by initiating the ICMP echo loop. Pass `nil` for
+// Echo begins attempting to connect to pwnat clients on a given IP address,
+// with a given fake host by sending the ICMP pilot echo. Pass `nil` for
 // `fakeHost` to use 3.3.3.3 by default.
-func (sv Picket) Listen(fakeHost *net.IPAddr, onDiscovered func(net.IPAddr)) (err error) {
+func (sv Picket) Echo (fakeHost *net.IPAddr, onDiscovered func(net.IPAddr)) (err error) {
 	conn, err := icmp.ListenPacket("ip4:icmp", "0.0.0.0")
+	defer conn.Close()
 	if err != nil {
 		return
 	}
