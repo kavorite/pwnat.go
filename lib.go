@@ -10,7 +10,7 @@ import (
 )
 
 var (
-	dFakeHost = &net.IPAddr{IP: net.ParseIP("3.3.3.3")}
+	dFakeHost = &net.IPAddr{IP: net.IP{3, 3, 3, 3}}
 	hasher    = adler32.New()
 )
 
