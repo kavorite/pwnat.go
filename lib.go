@@ -32,7 +32,7 @@ type Picket struct {
 
 // NextPort returns an OS port according to synchronized state.
 func (sv Picket) NextPort(t time.Time) uint16 {
-	return uint16(t.Round(t.Second*2).Unix() % (0x01 << 16))
+	return uint16(t.Round(time.Second*2).Unix() % (0x01 << 16))
 }
 
 // Telegraph announces itself to another picket. This can be run concurrently
@@ -54,7 +54,7 @@ func (sv Picket) Telegraph(peer net.Addr) {
 // calls with a remote host using a remote time server and local state
 // to establish a peer to peer connection.
 // TODO: Context cancellations?
-func (sv Picket) SyncOpen(remote IPAddr, interval time.Duration, deadline *time.Time) (conn *net.TCPConn, err error) {
+func (sv Picket) SyncOpen(remote net.IPAddr, interval time.Duration, deadline *time.Time) (conn *net.TCPConn, err error) {
 	rsp, _ := ntp.Query(sv.NTP)
 	t := rsp.Time.Add(rsp.RTT)
 	// get preferred outbound IP
@@ -63,16 +63,17 @@ func (sv Picket) SyncOpen(remote IPAddr, interval time.Duration, deadline *time.
 		return
 	}
 	laddr := c.LocalAddr().(*net.TCPAddr)
-	port := sv.NextPort(t)
+	port := int(sv.NextPort(t))
 	laddr.Port = port
 	raddr := net.TCPAddr{IP: remote.IP, Zone: remote.Zone, Port: port}
 	time.Sleep(time.Now().Sub(t))
-	for _ := range time.NewTicker(duration).C {
-		conn, err = net.DialTCP("tcp", &laddr, &raddr)
+	for range time.NewTicker(interval).C {
+		conn, err = net.DialTCP("tcp", laddr, &raddr)
 		if (deadline != nil && t.After(*deadline)) || err == nil {
 			return
 		}
 	}
+	return
 }
 
 // Listen begins attempting to connect to pwnat clients on a given IP address,
@@ -111,7 +112,7 @@ func (sv Picket) Listen(fakeHost *net.IPAddr, onDiscovered func(net.IPAddr)) (er
 		echo := read.Body.(*icmp.Echo)
 		hasher.Write([]byte(sv.PSK))
 		if echo.ID == int(hasher.Sum32()) {
-			onDiscovered(*peer.(*IPAddr))
+			onDiscovered(*peer.(*net.IPAddr))
 		}
 	}
 	return
