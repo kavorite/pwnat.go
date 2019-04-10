@@ -12,7 +12,7 @@ import (
 )
 
 var (
-	svAddr string
+	svAddr       string
 	psk          string
 	ntpHost      = "time.google.com"
 	picket 		 pwnat.Picket
@@ -28,6 +28,7 @@ func onPeerDiscovered(peer net.IPAddr) {
 	go func() {
 		for time.Now().Before(deadline) {
 			picket.Telegraph(&peer)
+			time.Sleep(500 * time.Millisecond)
 		}
 	}()
 	go func() {
@@ -52,11 +53,11 @@ func main() {
 			" or obfuscated in any way.")
 	flag.Parse()
 	picket = pwnat.Picket{PSK: psk, NTP: ntpHost}
-	// if we're serving, wait for clients to connect, telegraph them, then
-	// attempt simultaneous open() on the synchro ticker for some predetermined
-	// TTL.
-	if svAddr == "" {
-		fmt.Fprintln(os.Stderr, "listening on all interfaces")
+	// Announce ourselves to the NAT and attempt a PSK check and simultaneous
+	// open() on the synchro ticker for all remote announcements; both clients
+	// and servers must engage in this step on mutual, predetermined
+	// contingencies to establish a connection
+	go func() {
 		ticker := time.NewTicker(500 * time.Millisecond)
 		for range ticker.C {
 			err := picket.Echo(nil, onPeerDiscovered)
@@ -64,7 +65,11 @@ func main() {
 				panic(fmt.Errorf("echo loop: %s", err))
 			}
 		}
-	} else {
+	}()
+
+	// If not serving, i.e. simply waiting for another connection regardless of
+	// who it happens to be, repeatedly telegraph the remote host
+	if svAddr != "" {
 		remote := net.ParseIP(svAddr)
 		if remote == nil {
 			ips, err := net.LookupIP(svAddr)
