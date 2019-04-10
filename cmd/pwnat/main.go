@@ -59,8 +59,10 @@ func onPeerDiscovered(peer net.IPAddr) {
 	// declare victory
 	fmt.Fprintf(os.Stderr, "%s\n", peer)
 	accepted.Put(true)
-	go io.Copy(os.Stdout, conn)
-	io.Copy(conn, os.Stdin)
+	go io.Copy(conn, os.Stdin)
+	io.Copy(os.Stdout, conn)
+	// disconnect on EOF, start accepting connections again
+	accepted.Put(false)
 }
 
 func main() {
