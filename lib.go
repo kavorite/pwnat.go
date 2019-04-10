@@ -11,10 +11,10 @@ import (
 
 var (
 	dFakeHost = &net.IPAddr{IP: net.IP{3, 3, 3, 3}}
-	hasher    = adler32.New()
 )
 
 func mkEcho(psk string) *icmp.Echo {
+	hasher := adler32.New()
 	hasher.Write([]byte(psk))
 	return &icmp.Echo{
 		ID:   int(hasher.Sum32()),
@@ -37,7 +37,7 @@ func (sv Picket) NextPort(t time.Time) uint16 {
 
 // Telegraph announces itself to another picket. This can be run concurrently
 // with Listen() in order to check whether a host is accessible.
-func (sv Picket) Telegraph(peer net.Addr) {
+func (sv Picket) Telegraph(peer net.Addr) error {
 	echo, _ := mkEcho(sv.PSK).Marshal(ipv4.ICMPTypeEcho.Protocol())
 	msg := icmp.Message{
 		Type: ipv4.ICMPTypeTimeExceeded, Code: 0,
@@ -45,9 +45,16 @@ func (sv Picket) Telegraph(peer net.Addr) {
 			Data: echo,
 		},
 	}
-	conn, _ := icmp.ListenPacket("ip4:icmp", "0.0.0.0")
-	wbuf, _ := msg.Marshal(nil)
-	conn.WriteTo(wbuf, peer)
+	conn, err := icmp.ListenPacket("ip4:icmp", "0.0.0.0")
+	if err != nil {
+		return err
+	}
+	wbuf, err := msg.Marshal(nil)
+	if err != nil {
+		return err
+	}
+	_, err = conn.WriteTo(wbuf, peer)
+	return err
 }
 
 // SyncOpen (synchronized open()) attempts to perform simultaneous open()
@@ -111,6 +118,7 @@ func (sv Picket) Echo (fakeHost *net.IPAddr, onDiscovered func(net.IPAddr)) (err
 	if read.Type == ipv4.ICMPTypeEchoReply {
 		// Check the PSK's hash against ours, and if it talks like a duck...
 		echo := read.Body.(*icmp.Echo)
+		hasher := adler32.New()
 		hasher.Write([]byte(sv.PSK))
 		if echo.ID == int(hasher.Sum32()) {
 			go onDiscovered(*peer.(*net.IPAddr))

@@ -1,45 +1,64 @@
 package main
 
 import (
-	"net"
+	"../.."
 	"flag"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"sync"
+	"sync/atomic"
 	"time"
-	"../.."
 )
 
+type ABool struct{ flag int32 }
+
+func (b ABool) Put(p bool) {
+	var i int32 = 0
+	if p {
+		i = 1
+	}
+	atomic.StoreInt32(&(b.flag), int32(i))
+}
+
+func (b ABool) Get() bool {
+	if atomic.LoadInt32(&(b.flag)) != 0 {
+		return true
+	}
+	return false
+}
+
 var (
-	svAddr       string
-	psk          string
-	ntpHost      = "time.google.com"
-	picket 		 pwnat.Picket
-	accepting    sync.Map
+	svAddr    string
+	psk       string
+	ntpHost   = "time.google.com"
+	picket    pwnat.Picket
+	accepted  = ABool{}
+	accepting sync.Map
 )
 
 func onPeerDiscovered(peer net.IPAddr) {
-	if _, ok := accepting.Load(peer); ok {
+	// don't attempt to connect to more than one peer at once
+	if _, ok := accepting.Load(peer); accepted.Get() || ok {
 		return
 	}
-	accepting.Store(peer, struct{}{})
 	deadline := time.Now().Add(time.Minute)
+	accepting.Store(peer, struct{}{})
 	go func() {
 		for time.Now().Before(deadline) {
 			picket.Telegraph(&peer)
 			time.Sleep(500 * time.Millisecond)
 		}
-	}()
-	go func() {
-		time.Sleep(time.Minute)
 		accepting.Delete(peer)
 	}()
 	conn, err := picket.SyncOpen(peer, 50*time.Millisecond, &deadline)
 	if err != nil {
 		panic(err)
 	}
+	// declare victory
 	fmt.Fprintf(os.Stderr, "%s\n", peer)
+	accepted.Put(true)
 	go io.Copy(os.Stdout, conn)
 	io.Copy(conn, os.Stdin)
 }
@@ -68,7 +87,8 @@ func main() {
 	}()
 
 	// If not serving, i.e. simply waiting for another connection regardless of
-	// who it happens to be, repeatedly telegraph the remote host
+	// who it happens to be, repeatedly telegraph the remote host to signal our
+	// intentions and authenticate ourselves
 	if svAddr != "" {
 		remote := net.ParseIP(svAddr)
 		if remote == nil {
@@ -78,6 +98,14 @@ func main() {
 			}
 			remote = ips[0]
 		}
-		picket.Telegraph(&net.IPAddr{IP: remote, Zone: ""})
+		go func() {
+			ticker := time.NewTicker(500 * time.Millisecond)
+			for range ticker.C {
+				err := picket.Telegraph(&net.IPAddr{IP: remote, Zone: ""})
+				if err != nil {
+					panic(fmt.Errorf("echo loop: %s", err))
+				}
+			}
+		}()
 	}
 }
