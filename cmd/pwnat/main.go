@@ -74,19 +74,6 @@ func main() {
 			" or obfuscated in any way.")
 	flag.Parse()
 	picket = pwnat.Picket{PSK: psk, NTP: ntpHost}
-	// Announce ourselves to the NAT and attempt a PSK check and simultaneous
-	// open() on the synchro ticker for all remote announcements; both clients
-	// and servers must engage in this step on mutual, predetermined
-	// contingencies to establish a connection
-	go func() {
-		ticker := time.NewTicker(500 * time.Millisecond)
-		for range ticker.C {
-			err := picket.Echo(nil, onPeerDiscovered)
-			if err != nil {
-				panic(fmt.Errorf("echo loop: %s", err))
-			}
-		}
-	}()
 
 	// If not serving, i.e. simply waiting for another connection regardless of
 	// who it happens to be, repeatedly telegraph the remote host to signal our
@@ -109,5 +96,17 @@ func main() {
 				}
 			}
 		}()
+	}
+
+	// Announce ourselves to the NAT and attempt a PSK check and simultaneous
+	// open() on the synchro ticker for all remote announcements; both clients
+	// and servers must engage in this step on mutual, predetermined
+	// contingencies to establish a connection
+	ticker := time.NewTicker(500 * time.Millisecond)
+	for range ticker.C {
+		err := picket.Echo(nil, onPeerDiscovered)
+		if err != nil {
+			panic(fmt.Errorf("echo loop: %s", err))
+		}
 	}
 }
