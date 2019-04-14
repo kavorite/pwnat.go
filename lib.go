@@ -5,8 +5,10 @@ import (
 	"golang.org/x/net/icmp"
 	"golang.org/x/net/ipv4"
 	"hash/adler32"
+	"math/rand"
 	"net"
 	"time"
+	"fmt"
 )
 
 var (
@@ -14,12 +16,11 @@ var (
 )
 
 func mkEcho(psk string) *icmp.Echo {
-	hasher := adler32.New()
-	hasher.Write([]byte(psk))
+	hash := adler32.Checksum([]byte(psk))
 	return &icmp.Echo{
-		ID:   int(hasher.Sum32()),
-		Seq:  1,
-		Data: []byte("pwnat.go"),
+		ID: rand.Int() % 0xffff,
+		Seq: 0,
+		Data: []byte(fmt.Sprintf("%x", hash)),
 	}
 }
 
@@ -32,12 +33,12 @@ type Picket struct {
 
 // NextPort returns an OS port according to synchronized state.
 func (sv Picket) NextPort(t time.Time) uint16 {
-	return uint16(t.Round(time.Second*2).Unix() % (0x01 << 16))
+	return uint16((t.Round(time.Second*2).Unix()+1000) % 0xffff)
 }
 
 // Telegraph announces itself to another picket. This can be run concurrently
 // with Listen() in order to check whether a host is accessible.
-func (sv Picket) Telegraph(peer net.Addr) error {
+func (sv Picket) Telegraph(peer net.Addr) (err error) {
 	echo, _ := mkEcho(sv.PSK).Marshal(ipv4.ICMPTypeEcho.Protocol())
 	msg := icmp.Message{
 		Type: ipv4.ICMPTypeTimeExceeded, Code: 0,
@@ -47,14 +48,14 @@ func (sv Picket) Telegraph(peer net.Addr) error {
 	}
 	conn, err := icmp.ListenPacket("ip4:icmp", "0.0.0.0")
 	if err != nil {
-		return err
+		return
 	}
 	wbuf, err := msg.Marshal(nil)
 	if err != nil {
-		return err
+		return
 	}
 	_, err = conn.WriteTo(wbuf, peer)
-	return err
+	return
 }
 
 // SyncOpen (synchronized open()) attempts to perform simultaneous open()
@@ -65,10 +66,10 @@ func (sv Picket) SyncOpen(remote net.IPAddr, interval time.Duration, deadline *t
 	rsp, _ := ntp.Query(sv.NTP)
 	t := rsp.Time.Add(rsp.RTT)
 	// get preferred outbound IP
-	c, err := net.Dial("tcp", "1.1.1.1:http")
+	c, err := net.Dial("tcp", "google.com:http")
 	if err != nil {
 		return
-	}
+	} 
 	laddr := c.LocalAddr().(*net.TCPAddr)
 	port := int(sv.NextPort(t))
 	laddr.Port = port
@@ -76,8 +77,11 @@ func (sv Picket) SyncOpen(remote net.IPAddr, interval time.Duration, deadline *t
 	time.Sleep(time.Now().Sub(t))
 	for range time.NewTicker(interval).C {
 		conn, err = net.DialTCP("tcp", laddr, &raddr)
-		if (deadline != nil && t.After(*deadline)) || err == nil {
+		if err == nil { 
 			return
+		}
+		if deadline != nil && t.After(*deadline) {
+			return nil, fmt.Errorf("synchronized open: connection timed out")
 		}
 	}
 	return
@@ -86,7 +90,7 @@ func (sv Picket) SyncOpen(remote net.IPAddr, interval time.Duration, deadline *t
 // Echo begins attempting to connect to pwnat clients on a given IP address,
 // with a given fake host by sending the ICMP pilot echo. Pass `nil` for
 // `fakeHost` to use 3.3.3.3 by default.
-func (sv Picket) Echo (fakeHost *net.IPAddr, onDiscovered func(net.IPAddr)) (err error) {
+func (sv Picket) Echo(fakeHost *net.IPAddr, onDiscovered func(net.IPAddr)) (err error) {
 	conn, err := icmp.ListenPacket("ip4:icmp", "0.0.0.0")
 	defer conn.Close()
 	if err != nil {
@@ -99,12 +103,12 @@ func (sv Picket) Echo (fakeHost *net.IPAddr, onDiscovered func(net.IPAddr)) (err
 		Type: ipv4.ICMPTypeEcho, Code: 0,
 		Body: mkEcho(sv.PSK),
 	}
-	wbuf, err := call.Marshal(nil)
+	wbuf, _ := call.Marshal(nil)
 	if err != nil {
 		return
 	}
 	if _, err = conn.WriteTo(wbuf, fakeHost); err != nil {
-		return
+		return 
 	}
 	rbuf := make([]byte, 1024)
 	n, peer, err := conn.ReadFrom(rbuf)
@@ -113,14 +117,14 @@ func (sv Picket) Echo (fakeHost *net.IPAddr, onDiscovered func(net.IPAddr)) (err
 	}
 	read, err := icmp.ParseMessage(ipv4.ICMPTypeEcho.Protocol(), rbuf[:n])
 	if err != nil {
-		return
+		return 
 	}
-	if read.Type == ipv4.ICMPTypeEchoReply {
-		// Check the PSK's hash against ours, and if it talks like a duck...
-		echo := read.Body.(*icmp.Echo)
-		hasher := adler32.New()
-		hasher.Write([]byte(sv.PSK))
-		if echo.ID == int(hasher.Sum32()) {
+	if read.Type == ipv4.ICMPTypeTimeExceeded {
+		// Check whether the Time Exceeded we're getting back is the same one we sent out
+		response := read.Body.(*icmp.TimeExceeded).Data
+		lhash := adler32.Checksum(wbuf)
+		rhash := adler32.Checksum(response)
+		if lhash == rhash {
 			go onDiscovered(*peer.(*net.IPAddr))
 		}
 	}

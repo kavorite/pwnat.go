@@ -12,16 +12,19 @@ import (
 	"time"
 )
 
+// ABool is an atomic boolean.
 type ABool struct{ flag int32 }
 
+// Put sets the value of the ABool's flag.
 func (b ABool) Put(p bool) {
-	var i int32 = 0
+	var i int32
 	if p {
 		i = 1
 	}
 	atomic.StoreInt32(&(b.flag), int32(i))
 }
 
+// Get retrieves and returns the value of the ABool's flag.
 func (b ABool) Get() bool {
 	if atomic.LoadInt32(&(b.flag)) != 0 {
 		return true
@@ -39,7 +42,9 @@ var (
 )
 
 func onPeerDiscovered(peer net.IPAddr) {
-	// don't attempt to connect to more than one peer at once
+	fmt.Fprintf(os.Stderr, "peer discovered: %s\n", peer)
+	// don't attempt to establish multiple connections with any peer, or to
+	// establish more than one connection
 	if _, ok := accepting.Load(peer); accepted.Get() || ok {
 		return
 	}
@@ -53,11 +58,12 @@ func onPeerDiscovered(peer net.IPAddr) {
 		accepting.Delete(peer)
 	}()
 	conn, err := picket.SyncOpen(peer, 50*time.Millisecond, &deadline)
+	defer conn.Close()
 	if err != nil {
 		panic(err)
 	}
 	// declare victory
-	fmt.Fprintf(os.Stderr, "%s\n", peer)
+	fmt.Fprintf(os.Stderr, "peer connected: %s\n", peer)
 	accepted.Put(true)
 	go io.Copy(conn, os.Stdin)
 	io.Copy(os.Stdout, conn)
@@ -70,8 +76,7 @@ func main() {
 	flag.StringVar(&ntpHost, "ntp", "time.google.com", "NTP host to query.")
 	flag.StringVar(&psk, "psk", "go",
 		"Pre-shared key used to identify valid clients."+
-			" Don't make this anything sensitive, as it won't be encrypted"+
-			" or obfuscated in any way.")
+			" Don't make this anything sensitive!")
 	flag.Parse()
 	picket = pwnat.Picket{PSK: psk, NTP: ntpHost}
 
@@ -97,11 +102,10 @@ func main() {
 			}
 		}()
 	}
-
 	// Announce ourselves to the NAT and attempt a PSK check and simultaneous
-	// open() on the synchro ticker for all remote announcements; both clients
-	// and servers must engage in this step on mutual, predetermined
-	// contingencies to establish a connection
+	// open() on the synchro ticker for all remote announcements. This must be
+	// done on both client and server because they each use ICMP Time Exceeded
+	// responses to identify each other.
 	ticker := time.NewTicker(500 * time.Millisecond)
 	for range ticker.C {
 		err := picket.Echo(nil, onPeerDiscovered)
